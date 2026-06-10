@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Target, Plus, RefreshCw, Trash2, TrendingUp, TrendingDown, Minus, ExternalLink, Clock, Loader2, X, Search, Globe, AlertCircle, Eye, EyeOff, Filter, ArrowUpDown } from "lucide-react";
-import { dummyRankings } from "../assets/assets";
+import { useApp } from "../context/AppContext";
+
 
 interface KeywordItem {
     _id: string;
@@ -20,6 +21,7 @@ interface KeywordItem {
 }
 
 export default function RankTracker() {
+    const {api} = useApp();
     const [keywords, setKeywords] = useState<KeywordItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [showAddModal, setShowAddModal] = useState(false);
@@ -34,38 +36,110 @@ export default function RankTracker() {
     const [sortBy, setSortBy] = useState("newest");
 
     const fetchKeywords = async () => {
-        setTimeout(() => {
-            setKeywords(dummyRankings);
+        try{
+            const res = await api.get("/api/rank/list");
+            if(res.data.success){
+                setKeywords(res.data.keywords);
+            }
+        }
+        catch(error){
+            console.error("Error fetching keywords:", error);
+        }
+        
             setLoading(false);
-        }, 1000);
+        
     };
 
     const handleAdd = async (e: React.SubmitEvent) => {
         e.preventDefault();
+        if(!newKeyword.trim() || !newUrl.trim()){
+            return;
+        }
         setAdding(true);
-        setTimeout(() => {
-            setShowAddModal(false);
-            setAdding(false);
-        }, 1000);
+        setAddError("");
+        try{
+            const res = await api.post("/api/rank/add", { keyword: newKeyword.trim(), url: newUrl.trim() });
+            if(res.data.success){
+                setKeywords((prev) => [res.data.tracking, ...prev]);
+                setNewKeyword("");
+                setNewUrl("");
+                setShowAddModal(false);
+
+                //Poll for completion
+                const id = res.data.tracking._id;
+                const pollInterval = setInterval(async () => {
+                    try{
+                        const check = await api.get(`/api/rank/${id}`);
+                        if(check.data.tracking.status !== "checking"){
+                            clearInterval(pollInterval);
+                            setKeywords((prev) => prev.map((k) => (k._id === id ? check.data.tracking : k)) );
+                        }
+                    }
+                    catch(error: any){
+                        console.error(error);
+                    }
+                },3000);
+            }
+        }
+        catch(err: any){
+            setAddError(err.response?.data?.message || "Failed to add keyword");
+        }
+        setAdding(false);
     };
 
     const handleRefresh = async (id: string) => {
         setRefreshing(id);
-        setTimeout(() => {
+        try{
+            await api.post(`/api/rank/${id}/refresh`)
+            //update status to checking
+           setKeywords((prev)=> prev.map((k)=>(k._id === id ? {...k, status:"checking"}:k)))
+
+           //poll for completion
+           const pollInterval = setInterval(async () => {
+                    try{
+                        const check = await api.get(`/api/rank/${id}`);
+                        if(check.data.tracking.status !== "checking"){
+                            clearInterval(pollInterval);
+                            setKeywords((prev) => prev.map((k) => (k._id === id ? check.data.tracking : k)) );
+                            setRefreshing(null);
+                        }
+                    }
+                    catch(error: any){
+                        console.error(error);
+                    }
+                },3000);
+        }
+        catch(error){
+            console.error("Refresh failed", error);
             setRefreshing(null);
-        }, 1000);
+        }
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm("Delete this keyword tracking?")) return;
         setDeleting(id);
-        setTimeout(() => {
-            setDeleting(null);
-        }, 1000);
+        try{
+            await api.delete(`/api/rank/${id}`);
+            setKeywords((prev)=> prev.filter((k)=> k._id !== id))
+        }
+        catch(error){
+            console.error("Delete failed", error);
+        }
+        setDeleting(null);
+        
     };
 
     const handleToggle = async (id: string) => {
-        console.log(id);
+        try{
+            const res = await api.put(`/api/rank/${id}/toggle`);
+            if(res.data.success){
+                setKeywords((prev)=> prev.map((k)=> k._id === id ? {...k,active:
+                    res.data.tracking.active}:k))
+            }
+        }
+        catch(error){
+            console.error("Toggle failed", error);
+        }
     };
 
     const getPositionBadge = (pos: number | null) => {
