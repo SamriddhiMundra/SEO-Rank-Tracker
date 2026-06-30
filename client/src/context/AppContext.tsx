@@ -1,4 +1,4 @@
-import type { Axios, AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
 import {
   createContext,
   useContext,
